@@ -1,0 +1,712 @@
+Resources:
+# Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: Assignment1
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      AvailabilityZone: eu-west-1a
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: True
+      Tags:
+        - Key: Name
+          Value: Public Subnet 1
+      VpcId: !Ref VPC
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      AvailabilityZone: eu-west-1b
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: True
+      Tags:
+        - Key: Name
+          Value: Public Subnet 2
+      VpcId: !Ref VPC
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Public route table
+        - Key: database
+          Value: 'true'
+  PublicRouteTableRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      AvailabilityZone: eu-west-1a
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: False
+      Tags:
+        - Key: Name
+          Value: Private Subnet 1
+      VpcId: !Ref VPC
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      AvailabilityZone: eu-west-1b
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: False
+      Tags:
+        - Key: Name
+          Value: Private Subnet 2
+      VpcId: !Ref VPC
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Private route table
+  PrivateRouteTableRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: NATInstance
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NATInstance
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+# Infrastructure
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: InternetGateway
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  NATInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: AttachGateway
+    Properties:
+      ImageId: ami-6975eb1e
+      InstanceType: t2.nano
+      KeyName: apahim_keys
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - Ref: NATSecurityGroup
+          SubnetId:
+            Ref: PublicSubnet1
+      SourceDestCheck: 'false'
+      Tags:
+        - Key: Name
+          Value: NATInstance
+  NATSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NATSecutiryGroup
+      GroupName: NATSecutiryGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref DatabaseSecurityGroup
+          Description: Allow inbound HTTP traffic from database servers
+          IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+        - SourceSecurityGroupId: !Ref DatabaseSecurityGroup
+          Description: Allow inbound HTTPS traffic from database servers
+          IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+      Tags:
+        - Key: Name
+          Value: NAT Instances Security Group
+      VpcId: !Ref VPC
+  Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0bb3fad3c0286ebd5
+      InstanceType: t2.nano
+      KeyName: apahim_keys
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - Ref: BastionSecurityGroup
+          SubnetId:
+            Ref: PublicSubnet1
+      SourceDestCheck: 'true'
+      Tags:
+        - Key: Name
+          Value: Bastion
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BastionSecurityGroup
+      GroupName: BastionSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - CidrIp: 37.228.227.79/32
+          Description: Allow inbound SSH traffic from Admins
+          IpProtocol: TCP
+          FromPort: 22
+          ToPort: 22
+      Tags:
+        - Key: Name
+          Value: Bastion Security Group
+      VpcId: !Ref VPC
+  # Database
+  DatabaseEFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: DatabaseEFSSecurityGroup
+      GroupName: DatabaseEFSSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref DatabaseSecurityGroup
+          Description: Allow inbound NFS traffic from Databases
+          IpProtocol: TCP
+          FromPort: 2049
+          ToPort: 2049
+      Tags:
+        - Key: Name
+          Value: Database EFS Security Group
+      VpcId: !Ref VPC
+  DatabaseEFS:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      FileSystemTags:
+        - Key: Name
+          Value: DatabaseEFS
+  EFSMountTargetPrivateSubnet1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref DatabaseEFS
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroups:
+        - !Ref DatabaseEFSSecurityGroup
+  EFSMountTargetPrivateSubnet2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref DatabaseEFS
+      SubnetId: !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref DatabaseEFSSecurityGroup
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: DatabaseSecurityGroup
+      GroupName: DatabaseSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref WebServerSecurityGroup
+          Description: Allow inbound PostgreSQL traffic from Web Servers
+          IpProtocol: TCP
+          FromPort: 5432
+          ToPort: 5432
+        - SourceSecurityGroupId: !Ref BastionSecurityGroup
+          Description: Allow inbound SSH traffic from bastions
+          IpProtocol: TCP
+          FromPort: 22
+          ToPort: 22
+      Tags:
+        - Key: Name
+          Value: Database Security Group
+      VpcId: !Ref VPC
+  DatabaseAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: DatabaseAutoScalingGroup
+      VPCZoneIdentifier:
+        - Ref: PrivateSubnet1
+        - Ref: PrivateSubnet2
+      LaunchConfigurationName:
+        Ref: DatabaseServersLaunchConfig
+      MaxSize: '2'
+      MinSize: '1'
+      Tags:
+        - Key: Name
+          Value: Database
+          PropagateAtLaunch: 'true'
+        - Key: database
+          Value: 'true'
+          PropagateAtLaunch: 'true'
+  DatabaseServersLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn:
+      - EFSMountTargetPrivateSubnet1
+      - EFSMountTargetPrivateSubnet2
+    Properties:
+      LaunchConfigurationName: DatabaseServersLaunchConfig
+      ImageId: ami-0bb3fad3c0286ebd5
+      InstanceType: t2.nano
+      KeyName: apahim_keys
+      SecurityGroups:
+        - Ref: DatabaseSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Adding the VIP
+          cat <<EOF > /etc/sysconfig/network-scripts/ifcfg-eth0:0
+          DEVICE=eth0:0
+          IPADDR=10.10.10.10
+          NETMASK=255.255.255.0
+          ONBOOT=yes
+          EOF
+          # Bringing the new VIP up
+          ifup eth0:0
+          # Installing docker
+          yum install -y docker tcpdump
+          # Making sure docker is started on system boot
+          systemctl start docker
+          systemctl enable docker
+          # Allow ec2-user to run docker commands
+          usermod -aG docker ec2-user
+          # Directory to mount the PostgreSQL data NFS volume
+          mkdir /data
+          # Creating the chkconfig script for the PostgreSQL container
+          cat <<EOF > /etc/init.d/postgres
+          #!/bin/bash
+          #
+          # postgres       Bring up PostgreSQL
+          #
+          # chkconfig: 3 50 50
+          # description: PostgreSQL Database
+          case "\$1" in
+          start)
+              mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport ${DatabaseEFS}.efs.${AWS::Region}.amazonaws.com:/ /data
+              docker run -d --restart=always --name postgres -p 5432:5432 -v /data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=postgres postgres
+              ;;
+          stop)
+              umount /data
+              docker stop postgres
+              docker rm postgres
+              ;;
+          status)
+              docker container ls --filter name=postgres
+              ;;
+          *)
+              echo $"Usage: $0 {start|stop|status|restart|force-reload}"
+              exit 1
+          esac
+          EOF
+          # Setting the permissions for the postgres script
+          chmod 755 /etc/init.d/postgres
+          # Setting up the PostgreSQL service
+          chkconfig postgres on
+          # Starting postgres
+          service postgres start
+# Web Servers
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: WebServerSecurityGroup
+      GroupName: WebServerSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+          Description: Allow inbound HTTP traffic from Load Balancer
+          IpProtocol: TCP
+          FromPort: 8080
+          ToPort: 8080
+        - SourceSecurityGroupId: !Ref BastionSecurityGroup
+          Description: Allow inbound SSH traffic from bastions
+          IpProtocol: TCP
+          FromPort: 22
+          ToPort: 22
+      Tags:
+        - Key: Name
+          Value: Web Servers Security Group
+      VpcId: !Ref VPC
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: LoadBalancerSecurityGroup
+      GroupName: LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow inbound HTTP traffic
+          IpProtocol: TCP
+          FromPort: 8080
+          ToPort: 8080
+      Tags:
+        - Key: Name
+          Value: Load Balancer Security Group
+      VpcId: !Ref VPC
+  WebServersLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn: DatabaseAutoScalingGroup
+    Properties:
+      LaunchConfigurationName: WebServersLaunchConfiguration
+      ImageId: ami-0a2e89fc4c1f98272
+      InstanceType: t2.nano
+      KeyName: apahim_keys
+      IamInstanceProfile:
+        Ref: WebServerInstanceProfile
+      SecurityGroups:
+        - Ref: WebServerSecurityGroup
+  WebServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: WebServerAutoScalingGroup
+      VPCZoneIdentifier:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+      LaunchConfigurationName:
+        Ref: WebServersLaunchConfig
+      TargetGroupARNs:
+        - Ref: WebServersTargetGroup
+      MaxSize: '3'
+      MinSize: '2'
+      Tags:
+        - Key: Name
+          Value: WebServer
+          PropagateAtLaunch: 'true'
+  WebServersTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Name: WebServersTargetGroup
+      Port: 8080
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '20'
+      UnhealthyThresholdCount: 3
+      VpcId:
+        Ref: 'VPC'
+      Tags:
+        - Key: Name
+          Value: WebServersTargetGroup
+        - Key: Port
+          Value: 8080
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: WebServersTargetGroup
+      LoadBalancerArn:
+        Ref: ApplicationLoadBalancer
+      Port: 8080
+      Protocol: HTTP
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: CloudyLB
+      Scheme: internet-facing
+      Subnets:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+      SecurityGroups:
+        - Ref: LoadBalancerSecurityGroup
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Ref: WebServerScaleDownPolicy
+      AlarmDescription: Scale-down if CPU < 40% for 2 minutes
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: WebServerAutoScalingGroup
+      EvaluationPeriods: '2'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: '60'
+      Statistic: Average
+      Threshold: '40'
+  WebServerScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerAutoScalingGroup
+      Cooldown: '60'
+      ScalingAdjustment: '-1'
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Ref: WebServerScaleUpPolicy
+      AlarmDescription: Scale-up if CPU > 60% for 2 minutes
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: WebServerAutoScalingGroup
+      EvaluationPeriods: '2'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: '60'
+      Statistic: Average
+      Threshold: '60'
+  WebServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerAutoScalingGroup
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - Ref: WebServerRole
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+  SecretManagerReadOnly:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: AssumeSecretsManagerCloudy
+      PolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: Allow
+            Resource: 'arn:aws:iam::851217607308:role/SecretsManagerCloudy'
+      Roles:
+        - Ref: WebServerRole
+  CloudWatchPutMetrics:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - cloudwatch:PutMetricData
+            Effect: Allow
+            Resource: '*'
+      PolicyName: CloudWatchPutMetrics
+      Roles:
+        - Ref: WebServerRole
+# Lambda for Database HA
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition: {}
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonVPCFullAccess
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+  CloudWatchLambdaDatabaseHARule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Rule to trigger lambda"
+      Name: CloudWatchLambdaDatabaseHARule
+      ScheduleExpression: "rate(1 minute)"
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${LambdaDatabaseHA.Arn}
+          Id: CloudWatchLambdaDatabaseHARule
+  LambdaSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Sub ${LambdaDatabaseHA.Arn}
+      Principal: 'events.amazonaws.com'
+      SourceArn: !Sub ${CloudWatchLambdaDatabaseHARule.Arn}
+  LambdaDatabaseHA:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt LambdaExecutionRole.Arn
+      FunctionName: LambdaDatabaseHA
+      Handler: "index.lambda_handler"
+      Timeout: 20
+      Runtime: python3.6
+      Code:
+        ZipFile: |
+          import json
+          import logging
+
+          import boto3
+
+
+          LOG = logging.getLogger()
+          LOG.setLevel(logging.INFO)
+
+          REGION = 'eu-west-1'
+          TAG = 'database'
+          DEST_CIDR_BLOCK = '10.10.10.10/32'
+
+          ec2 = boto3.client('ec2', region_name=REGION)
+
+
+          def lambda_handler(event, context):
+              instances = ec2.describe_instances()
+              # Getting all the instances of the database
+              candidates = list()
+              for instance in instances['Reservations']:
+                  for item in instance['Instances']:
+                      if 'Tags' not in item:
+                          continue
+                      for tag in item['Tags']:
+                          if tag['Key'] != TAG:
+                              continue
+                          if tag['Value'] != 'true':
+                              continue
+                          candidates.append(item['InstanceId'])
+
+              status = ec2.describe_instance_status(InstanceIds=list(candidates))
+              online = list()
+              for instance_status in status['InstanceStatuses']:
+                  if instance_status['InstanceStatus']['Status'] == 'ok':
+                      online.append(instance_status['InstanceId'])
+
+              if not online:
+                  msg = 'No online instances to work with'
+                  LOG.error(msg)
+                  return {
+                      'statusCode': 403,
+                      'body': json.dumps(msg)
+                  }
+
+              route_tables = ec2.describe_route_tables()
+              new_gw = online[0]
+              for route_table in route_tables['RouteTables']:
+                  route_table_id = route_table['RouteTableId']
+
+                  if not is_database_rotue_table(route_table):
+                      continue
+
+                  current_route = None
+                  for route in route_table['Routes']:
+                      if route['DestinationCidrBlock'] != DEST_CIDR_BLOCK:
+                          continue
+                      current_route = route
+
+                  if current_route is None:
+                      ec2.create_route(DestinationCidrBlock=DEST_CIDR_BLOCK,
+                                       InstanceId=new_gw,
+                                       RouteTableId=route_table_id)
+                      # While on it, let's make sure to disable the SourceDestCheck
+                      # for all the online database instances
+                      ec2.modify_instance_attribute(
+                          InstanceId=new_gw,
+                          SourceDestCheck={'Value': False}
+                      )
+                      msg = (f'Added route on {route_table_id} '
+                             f'to {DEST_CIDR_BLOCK} via {new_gw}')
+                      LOG.info(msg)
+                      return {
+                          'statusCode': 200,
+                          'body': json.dumps(msg)
+                      }
+
+                  if 'InstanceId' in current_route:
+                      current_gw = current_route['InstanceId']
+                      if current_gw in online:
+                          msg = (f'Route on {route_table_id} already '
+                                 f'pointing to {DEST_CIDR_BLOCK} '
+                                 f'via {current_gw}')
+                          LOG.info(msg)
+                          return {
+                              'statusCode': 200,
+                              'body': json.dumps(msg)
+                          }
+
+                  ec2.delete_route(DestinationCidrBlock=DEST_CIDR_BLOCK,
+                                   RouteTableId=route_table_id)
+                  ec2.create_route(DestinationCidrBlock=DEST_CIDR_BLOCK,
+                                   InstanceId=new_gw,
+                                   RouteTableId=route_table_id)
+                  # While on it, let's make sure to disable the SourceDestCheck
+                  # for all the online database instances
+                  ec2.modify_instance_attribute(
+                      InstanceId=new_gw,
+                      SourceDestCheck={'Value': False}
+                  )
+                  msg = (f'Updated route on {route_table_id} '
+                         f'to {DEST_CIDR_BLOCK} via {new_gw}')
+                  LOG.info(msg)
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(msg)
+                  }
+
+
+          def is_database_rotue_table(route_table):
+              for tag in route_table['Tags']:
+                  if tag['Key'] != TAG:
+                      continue
+                  if tag['Value'] != 'true':
+                      continue
+                  return True
+              return False
